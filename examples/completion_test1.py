@@ -1,6 +1,6 @@
-# 
 #
-#customized test for 3d convolution 
+#
+# customized test for 3d convolution
 # of the code.
 import os
 import sys
@@ -26,13 +26,6 @@ import MinkowskiEngine as ME
 
 from reconstruction import ModelNet40Dataset, InfSampler
 
-M = np.array(
-    [
-        [0.80656762, -0.5868724, -0.07091862],
-        [0.3770505, 0.418344, 0.82632997],
-        [-0.45528188, -0.6932309, 0.55870326],
-    ]
-)
 
 assert (
     int(o3d.__version__.split(".")[1]) >= 8
@@ -42,7 +35,13 @@ if not os.path.exists("ModelNet40"):
     logging.info("Downloading the pruned ModelNet40 dataset...")
     subprocess.run(["sh", "./examples/download_modelnet40.sh"])
 
-
+RotationMat = np.array(
+    [
+        [0.80656762, -0.5868724, -0.07091862],
+        [0.3770505, 0.418344, 0.82632997],
+        [-0.45528188, -0.6932309, 0.55870326],
+    ]
+)
 ###############################################################################
 # Utility functions
 ###############################################################################
@@ -112,8 +111,8 @@ logging.basicConfig(
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=128)
-parser.add_argument("--max_iter", type=int, default=30000)
-parser.add_argument("--val_freq", type=int, default=1000)
+parser.add_argument("--max_iter", type=int, default=100)
+parser.add_argument("--val_freq", type=int, default=10)
 parser.add_argument("--batch_size", default=16, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
@@ -132,8 +131,8 @@ parser.add_argument("--max_visualization", type=int, default=4)
 
 class CompletionNet(nn.Module):
 
-    ENC_CHANNELS = [16, 32, 64, 128, 256, 512, 1024]
-    DEC_CHANNELS = [16, 32, 64, 128, 256, 512, 1024]
+    ENC_CHANNELS = [16, 32, 64, 128, 256, 512]
+    DEC_CHANNELS = [16, 32, 64, 128, 256, 512]
 
     def __init__(self, resolution, in_nchannel=512):
         nn.Module.__init__(self)
@@ -146,7 +145,8 @@ class CompletionNet(nn.Module):
 
         # Encoder
         self.enc_block_s1 = nn.Sequential(
-            ME.MinkowskiConvolution(1, enc_ch[0], kernel_size=3, stride=1, dimension=3),
+            ME.MinkowskiConvolution(
+                1, enc_ch[0], kernel_size=3, stride=1, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[0]),
             ME.MinkowskiELU(),
         )
@@ -157,7 +157,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(enc_ch[1]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[1], enc_ch[1], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                enc_ch[1], enc_ch[1], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[1]),
             ME.MinkowskiELU(),
         )
@@ -168,9 +169,10 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(enc_ch[2]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[2], enc_ch[2], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                enc_ch[2], enc_ch[2], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[2]),
-            ME.MinkowskiELU(),
+            ME.MinkowskiELU(), bias
         )
 
         self.enc_block_s4s8 = nn.Sequential(
@@ -179,7 +181,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(enc_ch[3]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[3], enc_ch[3], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                enc_ch[3], enc_ch[3], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[3]),
             ME.MinkowskiELU(),
         )
@@ -190,7 +193,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(enc_ch[4]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[4], enc_ch[4], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                enc_ch[4], enc_ch[4], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[4]),
             ME.MinkowskiELU(),
         )
@@ -201,7 +205,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(enc_ch[5]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[5], enc_ch[5], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                enc_ch[5], enc_ch[5], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[5]),
             ME.MinkowskiELU(),
         )
@@ -212,7 +217,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(enc_ch[6]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[6], enc_ch[6], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                enc_ch[6], enc_ch[6], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(enc_ch[6]),
             ME.MinkowskiELU(),
         )
@@ -228,7 +234,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(dec_ch[5]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[5], dec_ch[5], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                dec_ch[5], dec_ch[5], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(dec_ch[5]),
             ME.MinkowskiELU(),
         )
@@ -247,7 +254,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(dec_ch[4]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[4], dec_ch[4], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                dec_ch[4], dec_ch[4], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(dec_ch[4]),
             ME.MinkowskiELU(),
         )
@@ -266,7 +274,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(dec_ch[3]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[3], dec_ch[3], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                dec_ch[3], dec_ch[3], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(dec_ch[3]),
             ME.MinkowskiELU(),
         )
@@ -285,7 +294,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(dec_ch[2]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[2], dec_ch[2], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                dec_ch[2], dec_ch[2], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(dec_ch[2]),
             ME.MinkowskiELU(),
         )
@@ -304,7 +314,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(dec_ch[1]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[1], dec_ch[1], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                dec_ch[1], dec_ch[1], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(dec_ch[1]),
             ME.MinkowskiELU(),
         )
@@ -323,7 +334,8 @@ class CompletionNet(nn.Module):
             ),
             ME.MinkowskiBatchNorm(dec_ch[0]),
             ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[0], dec_ch[0], kernel_size=3, dimension=3),
+            ME.MinkowskiConvolution(
+                dec_ch[0], dec_ch[0], kernel_size=3, dimension=3),
             ME.MinkowskiBatchNorm(dec_ch[0]),
             ME.MinkowskiELU(),
         )
@@ -367,32 +379,11 @@ class CompletionNet(nn.Module):
         enc_s8 = self.enc_block_s4s8(enc_s4)
         enc_s16 = self.enc_block_s8s16(enc_s8)
         enc_s32 = self.enc_block_s16s32(enc_s16)
-        enc_s64 = self.enc_block_s32s64(enc_s32)
-
-        ##################################################
-        # Decoder 64 -> 32
-        ##################################################
-        dec_s32 = self.dec_block_s64s32(enc_s64)
-
-        # Add encoder features
-        dec_s32 = dec_s32 + enc_s32
-        dec_s32_cls = self.dec_s32_cls(dec_s32)
-        keep_s32 = (dec_s32_cls.F > 0).squeeze()
-
-        target = self.get_target(dec_s32, target_key)
-        targets.append(target)
-        out_cls.append(dec_s32_cls)
-
-        if self.training:
-            keep_s32 += target
-
-        # Remove voxels s32
-        dec_s32 = self.pruning(dec_s32, keep_s32)
 
         ##################################################
         # Decoder 32 -> 16
         ##################################################
-        dec_s16 = self.dec_block_s32s16(dec_s32)
+        dec_s16 = self.dec_block_s32s16(enc_s32)
 
         # Add encoder features
         dec_s16 = dec_s16 + enc_s16
@@ -503,7 +494,7 @@ def train(net, dataloader, device, config):
     )
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, 0.95)
 
-    crit = nn.BCEWithLogitsLoss()
+    crit = nn.BCEWithLogitsLoss()  #  LOSS funtion defined here, binry entropy loss.
 
     net.train()
     train_iter = iter(dataloader)
@@ -537,7 +528,8 @@ def train(net, dataloader, device, config):
         num_layers, loss = len(out_cls), 0
         losses = []
         for out_cl, target in zip(out_cls, targets):
-            curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
+            curr_loss = crit(out_cl.F.squeeze(), target.type(
+                out_cl.F.dtype).to(device))
             losses.append(curr_loss.item())
             loss += curr_loss / num_layers
 
@@ -606,7 +598,7 @@ def visualize(net, dataloader, device, config):
             opcd = PointCloud(data_dict["cropped_coords"][b])
             opcd.translate([-0.6 * config.resolution, 0, 0])
             opcd.estimate_normals()
-            opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            opcd.rotate(RotationMat, np.array([[0.0], [0.0], [0.0]]))
             o3d.visualization.draw_geometries([pcd, opcd])
 
             n_vis += 1
@@ -639,7 +631,8 @@ if __name__ == "__main__":
         train(net, dataloader, device, config)
     else:
         if not os.path.exists(config.weights):
-            logging.info(f"Downloaing pretrained weights. This might take a while...")
+            logging.info(
+                f"Downloaing pretrained weights. This might take a while...")
             urllib.request.urlretrieve(
                 "https://bit.ly/36d9m1n", filename=config.weights
             )
