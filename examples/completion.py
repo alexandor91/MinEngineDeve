@@ -595,16 +595,16 @@ def visualize(net, dataloader, device, config):
         in_feat = torch.ones((len(data_dict["coords"]), 1))
 
         sin = ME.SparseTensor(
-            feats=in_feat,
-            coords=data_dict["coords"],
-        ).to(device)
+            features=in_feat,
+            coordinates=data_dict["coords"],
+            device=device,
+        )
 
         # Generate target sparse tensor
-        cm = sin.coords_man
-        target_key = cm.create_coords_key(
-            ME.utils.batched_coordinates(data_dict["xyzs"]),
-            force_creation=True,
-            allow_duplicate_coords=True,
+        cm = sin.coordinate_manager
+        target_key, _ = cm.insert_and_map(
+            ME.utils.batched_coordinates(data_dict["xyzs"]).to(device),
+            string_id="target",
         )
 
         # Generate from a dense tensor
@@ -618,19 +618,22 @@ def visualize(net, dataloader, device, config):
 
         batch_coords, batch_feats = sout.decomposed_coordinates_and_features
         for b, (coords, feats) in enumerate(zip(batch_coords, batch_feats)):
-            pcd = PointCloud(coords)
-            pcd.estimate_normals()
+            pcd = PointCloud(coords.cpu())
+            #pcd.estimate_normals()
             pcd.translate([0.6 * config.resolution, 0, 0])
             pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-            opcd = PointCloud(data_dict["cropped_coords"][b])
-            opcd.translate([-0.6 * config.resolution, 0, 0])
-            opcd.estimate_normals()
-            opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-            o3d.visualization.draw_geometries([pcd, opcd])
 
-            n_vis += 1
-            if n_vis > config.max_visualization:
-                return
+            #inpcd = PointCloud(data_dict["coords"].cpu())
+            inpcd.translate([-0.6 * config.resolution, 0, 0])
+            ## opcd.estimate_normals()
+            inpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+
+            #opcd = PointCloud(data_dict["cropped_coords"][b])
+            #opcd.translate([-0.6 * config.resolution, 0, 0])
+            ## opcd.estimate_normals()
+            #opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+
+            o3d.visualization.draw_geometries([pcd, inpcd])
 
 
 if __name__ == "__main__":
@@ -654,6 +657,7 @@ if __name__ == "__main__":
 
     logging.info(net)
 
+    config.eval = True
     if not config.eval:
         train(net, dataloader, device, config)
     else:
@@ -665,6 +669,7 @@ if __name__ == "__main__":
 
         logging.info(f"Loading weights from {config.weights}")
         checkpoint = torch.load(config.weights)
+        #net = nn.DataParallel(net)
         net.load_state_dict(checkpoint["state_dict"])
 
         visualize(net, dataloader, device, config)
