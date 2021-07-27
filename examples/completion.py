@@ -37,13 +37,16 @@ except ImportError:
     raise ImportError("Please install open3d with `pip install open3d`.")
 
 import torch
+torch.cuda.empty_cache()
 import torch.nn as nn
 import torch.utils.data
 import torch.optim as optim
 
 import MinkowskiEngine as ME
-
 from reconstruction import ModelNet40Dataset, InfSampler
+
+
+
 
 M = np.array(
     [
@@ -81,7 +84,7 @@ class CollationAndTransformation:
     def random_crop(self, coords_list):
         crop_coords_list = []
         for coords in coords_list:
-            sel = coords[:, 0] < self.resolution / 3
+            sel = coords[:, 0] < self.resolution / 3                    # one third reso as default for training
             crop_coords_list.append(coords[sel])
         return crop_coords_list
 
@@ -611,29 +614,44 @@ def visualize(net, dataloader, device, config):
         out_cls, targets, sout = net(sin, target_key)
         num_layers, loss = len(out_cls), 0
         for out_cl, target in zip(out_cls, targets):
-            loss += (
-                crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
-                / num_layers
-            )
+            None
+            #loss += (
+            #   crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
+            #    / num_layers
+            #)
+            #print("$$$$$$$$$$$$$$$$$$$$$")
+            #print(target)  
 
         batch_coords, batch_feats = sout.decomposed_coordinates_and_features
-        for b, (coords, feats) in enumerate(zip(batch_coords, batch_feats)):
+        inpointSet = o3d.geometry.PointCloud()
+        for b, (coords, feats, target) in enumerate(zip(batch_coords, batch_feats, targets)):
             pcd = PointCloud(coords.cpu())
             #pcd.estimate_normals()
             pcd.translate([0.6 * config.resolution, 0, 0])
             pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            pcd.paint_uniform_color([0.5, 0.5, 0.5])
 
-            #inpcd = PointCloud(data_dict["coords"].cpu())
-            inpcd.translate([-0.6 * config.resolution, 0, 0])
-            ## opcd.estimate_normals()
-            inpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+
+            #inpcd = PointCloud(temp)
+            #inpcd.translate([-0.6 * config.resolution, 0, 0])
+            ## inpcd.estimate_normals()
+            #inpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
 
             #opcd = PointCloud(data_dict["cropped_coords"][b])
             #opcd.translate([-0.6 * config.resolution, 0, 0])
             ## opcd.estimate_normals()
-            #opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+        
+        #opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+        #def rotate_view(vis):
+        #        ctr = vis.get_view_control()
+        #        ctr.rotate(10.0, 0.0)
+        #        return False
 
-            o3d.visualization.draw_geometries([pcd, inpcd])
+        #o3d.visualization.draw_geometries_with_animation_callback([pcd], rotate_view)
+        #print(input_pcd) 
+        input_pcd = data_dict["coords"][:, [1,2,3]] 
+        inpointSet.points = o3d.utility.Vector3dVector(input_pcd)
+        o3d.visualization.draw_geometries([pcd, inpointSet])
 
 
 if __name__ == "__main__":
