@@ -681,7 +681,7 @@ class Visualizations:
 
 def train(net, dataloader, device, config):
 
-    vis = Visualizations()
+    #vis = Visualizations()
     # Training loop
     loss_values = []
 
@@ -731,9 +731,9 @@ def train(net, dataloader, device, config):
             losses.append(curr_loss.item())
             loss += curr_loss / num_layers
 
-        loss_values.append(1)
-        vis.plot_loss(np.mean(loss_values), i)
-        loss_values.clear()
+        #loss_values.append(1)
+        #vis.plot_loss(np.mean(loss_values), i)
+        #loss_values.clear()
         loss.backward()
         optimizer.step()
         t = time() - s
