@@ -860,6 +860,7 @@ if __name__ == "__main__":
 
     config.eval = False
 
+
     if not config.eval:
         train(net, dataloader, device, config)
     else:
