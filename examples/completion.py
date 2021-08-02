@@ -792,36 +792,51 @@ def visualize(net, dataloader, device, config):
             #   crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
             #    / num_layers
             #)
-            #print("$$$$$$$$$$$$$$$$$$$$$")
-            #print(target)  
+
 
         batch_coords, batch_feats = sout.decomposed_coordinates_and_features
-        inpointSet = o3d.geometry.PointCloud()
+        counter = 0
         for b, (coords, feats, target) in enumerate(zip(batch_coords, batch_feats, targets)):
             pcd = PointCloud(coords.cpu())
             #pcd.estimate_normals()
-            pcd.translate([0.6 * config.resolution, 0, 0])
+            pcd.translate([0.9 * config.resolution, 0, 0])
             pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
             pcd.paint_uniform_color([0.5, 0.5, 0.5])
 
+            opcd = PointCloud(data_dict["cropped_coords"][b])
+            #inpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
+            opcd.translate([-0.9 * config.resolution, 0, 0])
+            opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            opcd.paint_uniform_color([0.5, 0.3, 0.4])
 
-            #inpcd = PointCloud(temp)
-            #inpcd.translate([-0.6 * config.resolution, 0, 0])
-            ## inpcd.estimate_normals()
-            #inpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            input_pcd = data_dict["coords"].numpy()[:, 0:4]
+            mask = (input_pcd[:,0]==b)
+            final_pcd = input_pcd[np.where(input_pcd[:,0]==b)]
+            print("###############")
+            print(final_pcd)
+            print(b)
+            inpointSet = o3d.geometry.PointCloud()
+            inpointSet.points = o3d.utility.Vector3dVector(final_pcd[:, 1:4])
+            inpointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            inpointSet.paint_uniform_color([0.4, 0.3, 0.4])
 
-            partialpcd = PointCloud(data_dict["cropped_coords"][b])
-            partialpcd.translate([-0.6 * config.resolution, 0, 0])
-            ## partialpcd.estimate_normals()
-        
-        #partialpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            o3d.visualization.draw_geometries([pcd, inpointSet, opcd])
 
+            ## opcd.estimate_normals()
+
+        #opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+        #def rotate_view(vis)s:
+        #        ctr = vis.get_view_control()
+        #        ctr.rotate(10.0, 0.0)
+        #        return False
 
         #o3d.visualization.draw_geometries_with_animation_callback([pcd], rotate_view)
-        #print(input_pcd) 
-        input_pcd = data_dict["coords"][:, [1,2,3]] 
-        inpointSet.points = o3d.utility.Vector3dVector(input_pcd)
-        o3d.visualization.draw_geometries([pcd, partialpcd])
+        #input_pcd = data_dict["coords"][:, [1,2,3]] 
+
+        #inpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
+        #pcd.translate([0.6 * config.resolution, 0, 0])
+        #inpointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+        #inpointSet.paint_uniform_color([0.4, 0.3, 0.4])
 
 
 if __name__ == "__main__":
