@@ -29,7 +29,9 @@ import logging
 import numpy as np
 from time import time
 import urllib
-
+import glob
+import visdom
+from datetime import datetime
 # Must be imported before large libs
 try:
     import open3d as o3d
@@ -43,7 +45,7 @@ import torch.utils.data
 import torch.optim as optim
 
 import MinkowskiEngine as ME
-from reconstruction import ModelNet40Dataset, InfSampler
+from reconstruction import InfSampler
 
 
 
@@ -100,6 +102,145 @@ class CollationAndTransformation:
             "labels": torch.LongTensor(labels),
         }
 
+def resample_mesh(mesh_cad, density=1):
+    """
+    https://chrischoy.github.io/research/barycentric-coordinate-for-mesh-sampling/
+    Samples point cloud on the surface of the model defined as vectices and
+    faces. This function uses vectorized operations so fast at the cost of some
+    memory.
+
+    param mesh_cad: low-polygon triangle mesh in o3d.geometry.TriangleMesh
+    param density: density of the point cloud per unit area
+    param return_numpy: return numpy format or open3d pointcloud format
+    return resampled point cloud
+
+    Reference :
+      [1] Barycentric coordinate system
+      \begin{align}
+        P = (1 - \sqrt{r_1})A + \sqrt{r_1} (1 - r_2) B + \sqrt{r_1} r_2 C
+      \end{align}
+    """
+    faces = np.array(mesh_cad.triangles).astype(int)
+    vertices = np.array(mesh_cad.vertices)
+
+    vec_cross = np.cross(
+        vertices[faces[:, 0], :] - vertices[faces[:, 2], :],
+        vertices[faces[:, 1], :] - vertices[faces[:, 2], :],
+    )
+    face_areas = np.sqrt(np.sum(vec_cross ** 2, 1))
+
+    n_samples = (np.sum(face_areas) * density).astype(int)
+    # face_areas = face_areas / np.sum(face_areas)
+
+    # Sample exactly n_samples. First, oversample points and remove redundant
+    # Bug fix by Yangyan (yangyan.lee@gmail.com)
+    n_samples_per_face = np.ceil(density * face_areas).astype(int)
+    floor_num = np.sum(n_samples_per_face) - n_samples
+    if floor_num > 0:
+        indices = np.where(n_samples_per_face > 0)[0]
+        floor_indices = np.random.choice(indices, floor_num, replace=True)
+        n_samples_per_face[floor_indices] -= 1
+
+    n_samples = np.sum(n_samples_per_face)
+
+    # Create a vector that contains the face indices
+    sample_face_idx = np.zeros((n_samples,), dtype=int)
+    acc = 0
+    for face_idx, _n_sample in enumerate(n_samples_per_face):
+        sample_face_idx[acc : acc + _n_sample] = face_idx
+        acc += _n_sample
+
+    r = np.random.rand(n_samples, 2)
+    A = vertices[faces[sample_face_idx, 0], :]
+    B = vertices[faces[sample_face_idx, 1], :]
+    C = vertices[faces[sample_face_idx, 2], :]
+
+    P = (
+        (1 - np.sqrt(r[:, 0:1])) * A
+        + np.sqrt(r[:, 0:1]) * (1 - r[:, 1:]) * B
+        + np.sqrt(r[:, 0:1]) * r[:, 1:] * C
+    )
+
+    return P
+
+class ModelNet40Dataset(torch.utils.data.Dataset):
+    def __init__(self, phase, transform=None, config=None):
+        self.phase = phase
+        self.files = []
+        self.cache = {}
+        self.data_objects = []
+        self.transform = transform
+        self.resolution = config.resolution
+        self.last_cache_percent = 0
+
+        self.root = "./ModelNet40"
+        fnames = glob.glob(os.path.join(self.root, "chair/train/*.off")) 
+        #bathtub bed bench bookshelf boottle chair cone cup curtain 
+        # desk dresser flower_pot glass_box toilet stool sofa stairs table
+        #car airplane person
+        #guitat keyboard lamp mantel monitor night_stand piano plant range_hood 
+        #sink sofa stairs stool table toilet tv_stand vase wardrobe xbox
+        fnames = sorted([os.path.relpath(fname, self.root) for fname in fnames])
+        self.files = fnames
+        assert len(self.files) > 0, "No file loaded"
+        logging.info(
+            f"Loading the subset {phase} from {self.root} with {len(self.files)} files"
+        )
+        self.density = 30000
+
+        # Ignore warnings in obj loader
+        o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        mesh_file = os.path.join(self.root, self.files[idx])
+        if idx in self.cache:
+            xyz = self.cache[idx]
+        else:
+            # Load a mesh, over sample, copy, rotate, voxelization
+            assert os.path.exists(mesh_file)
+            pcd = o3d.io.read_triangle_mesh(mesh_file)
+            # Normalize to fit the mesh inside a unit cube while preserving aspect ratio
+            vertices = np.asarray(pcd.vertices)
+            vmax = vertices.max(0, keepdims=True)
+            vmin = vertices.min(0, keepdims=True)
+            pcd.vertices = o3d.utility.Vector3dVector(
+                (vertices - vmin) / (vmax - vmin).max()
+            )
+
+            # Oversample points and copy
+            xyz = resample_mesh(pcd, density=self.density)
+            self.cache[idx] = xyz
+            cache_percent = int((len(self.cache) / len(self)) * 100)
+            if (
+                cache_percent > 0
+                and cache_percent % 10 == 0
+                and cache_percent != self.last_cache_percent
+            ):
+                logging.info(
+                    f"Cached {self.phase}: {len(self.cache)} / {len(self)}: {cache_percent}%"
+                )
+                self.last_cache_percent = cache_percent
+
+        # Use color or other features if available
+        feats = np.ones((len(xyz), 1))
+
+        if len(xyz) < 1000:
+            logging.info(
+                f"Skipping {mesh_file}: does not have sufficient CAD sampling density after resampling: {len(xyz)}."
+            )
+            return None
+
+        if self.transform:
+            xyz, feats = self.transform(xyz, feats)
+
+        # Get coords
+        xyz = xyz * self.resolution
+        coords, inds = ME.utils.sparse_quantize(xyz, return_index=True)
+
+        return (coords, xyz[inds], idx)
 
 def make_data_loader(
     phase, augment_data, batch_size, shuffle, num_workers, repeat, config
@@ -134,14 +275,14 @@ logging.basicConfig(
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=128)
-parser.add_argument("--max_iter", type=int, default=30000)
-parser.add_argument("--val_freq", type=int, default=1000)
+parser.add_argument("--epochs", type=int, default=300)     #default 30000
+parser.add_argument("--val_freq", type=int, default=10)      #default is 1000
 parser.add_argument("--batch_size", default=16, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
 parser.add_argument("--num_workers", type=int, default=1)
-parser.add_argument("--stat_freq", type=int, default=50)
+parser.add_argument("--stat_freq", type=int, default=5)
 parser.add_argument("--weights", type=str, default="modelnet_completion.pth")
 parser.add_argument("--load_optimizer", type=str, default="true")
 parser.add_argument("--eval", action="store_true")
@@ -515,8 +656,35 @@ class CompletionNet(nn.Module):
 
         return out_cls, targets, dec_s1
 
+class Visualizations:
+    def __init__(self, env_name=None):
+        if env_name is None:
+            env_name = str(datetime.now().strftime("%d-%m %Hh%M"))
+        self.env_name = env_name
+        # Initialize the visualization environment
+        self.vis = visdom.Visdom(env=self.env_name)
+        self.vis.text('Plotting!')
+        self.loss_win = None
+
+    def plot_loss(self, loss, step):
+        self.loss_win = self.vis.line(
+            [loss],
+            [step],
+            win=self.loss_win,
+            update='append' if self.loss_win else None,
+            opts=dict(
+                xlabel='Step',
+                ylabel='Loss',
+                title='Loss (mean per 10 steps)',
+            )
+        )
 
 def train(net, dataloader, device, config):
+
+    vis = Visualizations()
+    # Training loop
+    loss_values = []
+
     optimizer = optim.SGD(
         net.parameters(),
         lr=config.lr,
@@ -531,7 +699,7 @@ def train(net, dataloader, device, config):
     train_iter = iter(dataloader)
     # val_iter = iter(val_dataloader)
     logging.info(f"LR: {scheduler.get_lr()}")
-    for i in range(config.max_iter):
+    for i in range(config.epochs):
 
         s = time()
         data_dict = train_iter.next()
@@ -563,14 +731,19 @@ def train(net, dataloader, device, config):
             losses.append(curr_loss.item())
             loss += curr_loss / num_layers
 
+        loss_values.append(1)
+        vis.plot_loss(np.mean(loss_values), i)
+        loss_values.clear()
         loss.backward()
         optimizer.step()
         t = time() - s
 
+        # Visualization data in browser and logging 
         if i % config.stat_freq == 0:
             logging.info(
                 f"Iter: {i}, Loss: {loss.item():.3e}, Data Loading Time: {d:.3e}, Tot Time: {t:.3e}"
             )
+
 
         if i % config.val_freq == 0 and i > 0:
             torch.save(
@@ -637,21 +810,18 @@ def visualize(net, dataloader, device, config):
             ## inpcd.estimate_normals()
             #inpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
 
-            #opcd = PointCloud(data_dict["cropped_coords"][b])
-            #opcd.translate([-0.6 * config.resolution, 0, 0])
-            ## opcd.estimate_normals()
+            partialpcd = PointCloud(data_dict["cropped_coords"][b])
+            partialpcd.translate([-0.6 * config.resolution, 0, 0])
+            ## partialpcd.estimate_normals()
         
-        #opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-        #def rotate_view(vis):
-        #        ctr = vis.get_view_control()
-        #        ctr.rotate(10.0, 0.0)
-        #        return False
+        #partialpcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+
 
         #o3d.visualization.draw_geometries_with_animation_callback([pcd], rotate_view)
         #print(input_pcd) 
         input_pcd = data_dict["coords"][:, [1,2,3]] 
         inpointSet.points = o3d.utility.Vector3dVector(input_pcd)
-        o3d.visualization.draw_geometries([pcd, inpointSet])
+        o3d.visualization.draw_geometries([pcd, partialpcd])
 
 
 if __name__ == "__main__":
@@ -659,15 +829,28 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataloader = make_data_loader(
-        "val",
-        augment_data=True,
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=config.num_workers,
-        repeat=True,
-        config=config,
-    )
+    config.eval = False
+    if not config.eval:
+        dataloader = make_data_loader(
+            "train",
+            augment_data=True,
+            batch_size=config.batch_size,
+            shuffle=True,
+            num_workers=config.num_workers,
+            repeat=True,
+            config=config,
+        )
+    else:
+        dataloader = make_data_loader(
+            "val",
+            augment_data=True,
+            batch_size=config.batch_size,
+            shuffle=True,
+            num_workers=config.num_workers,
+            repeat=True,
+            config=config,
+        )
+
     in_nchannel = len(dataloader.dataset)
 
     net = CompletionNet(config.resolution, in_nchannel=in_nchannel)
@@ -675,7 +858,6 @@ if __name__ == "__main__":
 
     logging.info(net)
 
-    config.eval = True
     if not config.eval:
         train(net, dataloader, device, config)
     else:
