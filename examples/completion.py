@@ -675,7 +675,7 @@ if __name__ == "__main__":
 
     logging.info(net)
 
-    config.eval = True
+    config.eval = False
     if not config.eval:
         train(net, dataloader, device, config)
     else:
