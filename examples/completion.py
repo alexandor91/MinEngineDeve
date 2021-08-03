@@ -47,7 +47,7 @@ import torch.optim as optim
 import MinkowskiEngine as ME
 from reconstruction import InfSampler
 
-
+import matplotlib.pyplot as plt
 
 
 M = np.array(
@@ -697,6 +697,8 @@ def train(net, dataloader, device, config):
 
     net.train()
     train_iter = iter(dataloader)
+    losses = []
+
     # val_iter = iter(val_dataloader)
     logging.info(f"LR: {scheduler.get_lr()}")
     for i in range(config.epochs):
@@ -725,7 +727,6 @@ def train(net, dataloader, device, config):
         # Generate from a dense tensor
         out_cls, targets, sout = net(sin, target_key)
         num_layers, loss = len(out_cls), 0
-        losses = []
         for out_cl, target in zip(out_cls, targets):
             curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
             losses.append(curr_loss.item())
@@ -737,6 +738,7 @@ def train(net, dataloader, device, config):
         loss.backward()
         optimizer.step()
         t = time() - s
+
 
         # Visualization data in browser and logging 
         if i % config.stat_freq == 0:
@@ -759,7 +761,16 @@ def train(net, dataloader, device, config):
             scheduler.step()
             logging.info(f"LR: {scheduler.get_lr()}")
 
-            net.train()
+            net.eval()
+        plt.plot(losses,'-o')
+        plt.xlabel('epoch')
+        plt.ylabel('losses')
+        plt.legend(['Train','Valid'])
+        plt.title('Train vs Valid Losses')
+
+        plt.show()
+        if i < config.epochs:
+            plt.close()
 
 
 def visualize(net, dataloader, device, config):
