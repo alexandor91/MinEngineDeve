@@ -735,7 +735,6 @@ def train(net, dataloader, device, config):
             loss += curr_loss / num_layers
         batch_losses = np.sum(batch_losses)/len(batch_losses)
         losses.append(batch_losses)
-        batch_losses.clear()
         #vis.plot_loss(np.mean(loss_values), i)
         #loss_values.clear()
         loss.backward()
