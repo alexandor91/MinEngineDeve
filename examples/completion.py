@@ -47,6 +47,7 @@ import torch.optim as optim
 import MinkowskiEngine as ME
 from reconstruction import InfSampler
 
+import matplotlib.pyplot as plt
 
 
 
@@ -699,6 +700,8 @@ def train(net, dataloader, device, config):
     train_iter = iter(dataloader)
     # val_iter = iter(val_dataloader)
     logging.info(f"LR: {scheduler.get_lr()}")
+    losses = []
+
     for i in range(config.epochs):
 
         s = time()
@@ -725,13 +728,14 @@ def train(net, dataloader, device, config):
         # Generate from a dense tensor
         out_cls, targets, sout = net(sin, target_key)
         num_layers, loss = len(out_cls), 0
-        losses = []
+        batch_losses = []
         for out_cl, target in zip(out_cls, targets):
             curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
-            losses.append(curr_loss.item())
+            batch_losses.append(curr_loss.item())
             loss += curr_loss / num_layers
-
-        #loss_values.append(1)
+        batch_losses = np.sum(batch_losses)/len(batch_losses)
+        losses.append(batch_losses)
+        batch_losses.clear()
         #vis.plot_loss(np.mean(loss_values), i)
         #loss_values.clear()
         loss.backward()
@@ -760,6 +764,14 @@ def train(net, dataloader, device, config):
             logging.info(f"LR: {scheduler.get_lr()}")
 
             net.train()
+
+    plt.plot(losses,'-o')
+    plt.xlabel('epoch')
+    plt.ylabel('losses')
+    plt.legend(['Train','Valid'])
+    plt.title('Train vs Valid Losses')
+
+    plt.show()
 
 
 def visualize(net, dataloader, device, config):
