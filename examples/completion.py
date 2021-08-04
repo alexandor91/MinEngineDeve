@@ -275,7 +275,7 @@ logging.basicConfig(
 )
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--resolution", type=int, default=128)
+parser.add_argument("--resolution", type=int, default=32)
 parser.add_argument("--epochs", type=int, default=300)     #default 30000
 parser.add_argument("--val_freq", type=int, default=10)      #default is 1000
 parser.add_argument("--batch_size", default=16, type=int)
