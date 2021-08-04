@@ -39,13 +39,14 @@ except ImportError:
     raise ImportError("Please install open3d with `pip install open3d`.")
 
 import torch
-torch.cuda.empty_cache()
+torch.cuda.empty_cache() #empty cache memory
 import torch.nn as nn
 import torch.utils.data
 import torch.optim as optim
+from torch.utils.data.sampler import Sampler
 
 import MinkowskiEngine as ME
-from reconstruction import InfSampler
+#from reconstruction import InfSampler
 
 import matplotlib.pyplot as plt
 
@@ -102,6 +103,34 @@ class CollationAndTransformation:
             "cropped_coords": coords,
             "labels": torch.LongTensor(labels),
         }
+class InfSampler(Sampler):
+    """Samples elements randomly, without replacement.
+
+    Arguments:
+        data_source (Dataset): dataset to sample from
+    """
+
+    def __init__(self, data_source, shuffle=False):
+        self.data_source = data_source
+        self.shuffle = shuffle
+        self.reset_permutation()
+
+    def reset_permutation(self):
+        perm = len(self.data_source)
+        if self.shuffle:
+            perm = torch.randperm(perm)
+        self._perm = perm.tolist()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if len(self._perm) == 0:
+            self.reset_permutation()
+        return self._perm.pop()
+
+    def __len__(self):
+        return len(self.data_source)
 
 def resample_mesh(mesh_cad, density=1):
     """
@@ -174,18 +203,25 @@ class ModelNet40Dataset(torch.utils.data.Dataset):
         self.resolution = config.resolution
         self.last_cache_percent = 0
 
-        self.root = "./ModelNet40"
-        fnames = glob.glob(os.path.join(self.root, "chair/train/*.off")) 
+        #self.root = "./ModelNet40"
+        self.base_name = "/home/eavise/MinEngineDeve/ModelNet40"
+        if (self.phase == "train"):
+            filename = os.path.join(self.base_name, "train_chair.txt")    #default filenames; "chair/train/*.off"
+        elif (self.phase == "test"):
+            filename = os.path.join(self.base_name, "test_chair.txt")    #default filenames; "chair/train/*.off"
+        with open(filename, "r") as f:
+            lines = f.read().splitlines() 
+        f.close()
         #bathtub bed bench bookshelf boottle chair cone cup curtain 
         # desk dresser flower_pot glass_box toilet stool sofa stairs table
         #car airplane person
         #guitat keyboard lamp mantel monitor night_stand piano plant range_hood 
         #sink sofa stairs stool table toilet tv_stand vase wardrobe xbox
-        fnames = sorted([os.path.relpath(fname, self.root) for fname in fnames])
-        self.files = fnames
+        #fnames = sorted([os.path.relpath(fname, self.root) for fname in fnames])
+        self.files = lines
         assert len(self.files) > 0, "No file loaded"
         logging.info(
-            f"Loading the subset {phase} from {self.root} with {len(self.files)} files"
+            f"Loading the subset {phase} from {self.base_name} with {len(self.files)} files"
         )
         self.density = 30000
 
@@ -196,15 +232,18 @@ class ModelNet40Dataset(torch.utils.data.Dataset):
         return len(self.files)
 
     def __getitem__(self, idx):
-        mesh_file = os.path.join(self.root, self.files[idx])
+        mesh_file = os.path.join(self.base_name, self.files[idx])
+
         if idx in self.cache:
             xyz = self.cache[idx]
         else:
             # Load a mesh, over sample, copy, rotate, voxelization
+            #mesh_file = '/home/eavise/MinEngineDeve/ModelNet40/chair/train/chair_0312.off'
             assert os.path.exists(mesh_file)
             pcd = o3d.io.read_triangle_mesh(mesh_file)
             # Normalize to fit the mesh inside a unit cube while preserving aspect ratio
             vertices = np.asarray(pcd.vertices)
+
             vmax = vertices.max(0, keepdims=True)
             vmin = vertices.min(0, keepdims=True)
             pcd.vertices = o3d.utility.Vector3dVector(
@@ -680,7 +719,7 @@ class Visualizations:
             )
         )
 
-def train(net, dataloader, device, config):
+def training_run(net, dataloader, device, config):
 
     #vis = Visualizations()
     # Training loop
@@ -804,9 +843,7 @@ def visualize(net, dataloader, device, config):
             #    / num_layers
             #)
 
-
         batch_coords, batch_feats = sout.decomposed_coordinates_and_features
-        counter = 0
         for b, (coords, feats, target) in enumerate(zip(batch_coords, batch_feats, targets)):
             pcd = PointCloud(coords.cpu())
             #pcd.estimate_normals()
@@ -831,18 +868,17 @@ def visualize(net, dataloader, device, config):
             inpointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
             inpointSet.paint_uniform_color([0.4, 0.3, 0.4])
 
-            o3d.visualization.draw_geometries([pcd, inpointSet, opcd])
+            #o3d.visualization.draw_geometries([pcd, inpointSet, opcd])
+            def rotate_view(vis):
+                   ctr = vis.get_view_control()
+                   ctr.rotate(10.0, 0.0)
+                   return False
 
-            ## opcd.estimate_normals()
+            o3d.visualization.draw_geometries_with_animation_callback([pcd, inpointSet, opcd], rotate_view)
 
-        #opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-        #def rotate_view(vis)s:
-        #        ctr = vis.get_view_control()
-        #        ctr.rotate(10.0, 0.0)
-        #        return False
+        print("666666")
 
-        #o3d.visualization.draw_geometries_with_animation_callback([pcd], rotate_view)
-        #input_pcd = data_dict["coords"][:, [1,2,3]] 
+
 
         #inpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
         #pcd.translate([0.6 * config.resolution, 0, 0])
@@ -855,7 +891,7 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    config.eval = False
+    config.eval = True
     if not config.eval:
         dataloader = make_data_loader(
             "train",
@@ -868,12 +904,12 @@ if __name__ == "__main__":
         )
     else:
         dataloader = make_data_loader(
-            "val",
-            augment_data=True,
+            "test",
+            augment_data=False,
             batch_size=config.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=config.num_workers,
-            repeat=True,
+            repeat=False,
             config=config,
         )
 
@@ -884,11 +920,8 @@ if __name__ == "__main__":
 
     logging.info(net)
 
-    config.eval = False
-
-
     if not config.eval:
-        train(net, dataloader, device, config)
+        training_run(net, dataloader, device, config)
     else:
         if not os.path.exists(config.weights):
             logging.info(f"Downloaing pretrained weights. This might take a while...")
