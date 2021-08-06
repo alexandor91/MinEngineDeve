@@ -103,6 +103,19 @@ class CollationAndTransformation:
             "cropped_coords": coords,
             "labels": torch.LongTensor(labels),
         }
+
+class OnlyCollationCopy:
+    def __init__(self, resolution):
+        self.resolution = resolution
+
+    def __call__(self, list_data):
+        coords, feats, labels = list(zip(*list_data))
+        # Concatenate all lists
+        return {
+            "coords": ME.utils.batched_coordinates(coords),
+            "xyzs": [torch.from_numpy(feat).float() for feat in feats],
+            "labels": torch.LongTensor(labels),
+        }
 class InfSampler(Sampler):
     """Samples elements randomly, without replacement.
 
@@ -382,20 +395,29 @@ def make_data_loader(
     return loader
 
 def valid_data_loader(
-    phase, augment_data, shuffle, num_workers, repeat, config
+    #phase, num_workers, config
+    phase, batch_size, shuffle, num_workers, repeat, config
 ):
+    batch_size = 2
     dset = ModelNet40ValidSubset(phase, config=config)
 
+    # args = {
+    #     "num_workers": num_workers,
+    #     "pin_memory": False,
+    #     "drop_last": False,
+    # }
     args = {
+        "batch_size": batch_size,
         "num_workers": num_workers,
+        "collate_fn": OnlyCollationCopy(config.resolution),
         "pin_memory": False,
         "drop_last": False,
     }
 
-    #if repeat:
-    #    args["sampler"] = InfSampler(dset, shuffle)
-    #else:
-    #    args["shuffle"] = shuffle
+    if repeat:
+       args["sampler"] = InfSampler(dset, shuffle)
+    else:
+       args["shuffle"] = shuffle
 
     loader = torch.utils.data.DataLoader(dset, **args)
 
@@ -412,9 +434,9 @@ logging.basicConfig(
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=32)
-parser.add_argument("--epochs", type=int, default=300)     #default 30000
+parser.add_argument("--epochs", type=int, default=60000)     #default 30000
 parser.add_argument("--val_freq", type=int, default=10)      #default is 1000
-parser.add_argument("--batch_size", default=8, type=int)
+parser.add_argument("--batch_size", default=6, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -838,6 +860,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
     logging.info(f"LR: {scheduler.get_lr()}")
     losses = []
     valid_losses = []
+    valid_steps = []
 
     for i in range(config.epochs):
 
@@ -865,12 +888,13 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
         # Generate from a dense tensor
         out_cls, targets, sout = net(sin, target_key)
         num_layers, loss = len(out_cls), 0
+        zip_losses = []
         for out_cl, target in zip(out_cls, targets):
             curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
-            #batch_losses.append(curr_loss.item())
+            zip_losses.append(curr_loss.item()/ num_layers)
             loss += curr_loss / num_layers
-        #batch_losses = np.sum(batch_losses)/len(batch_losses)
-        losses.append(loss)
+        avg_loss = np.sum(zip_losses)/len(zip_losses)
+        losses.append(avg_loss)
 
         loss.backward()
         optimizer.step()
@@ -884,34 +908,35 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
 
         # Valid dataset loss storage
         if i % config.val_freq == 0 and i > 0:
-            s = time()
             validdata_dict = valid_iter.next()
-            d = time() - s
-
+            valid_steps.append(i)
             optimizer.zero_grad()
 
-            in_feat = torch.ones((len(validdata_dict["coords"]), 1))
+            valid_in_feat = torch.ones((len(validdata_dict["coords"]), 1))
 
-            sin = ME.SparseTensor(
-                features=in_feat,
-                coordinates=data_dict["coords"],
+            valid_sin = ME.SparseTensor(
+                features=valid_in_feat,
+                coordinates=validdata_dict["coords"],
                 device=device,
             )
 
             # Generate target sparse tensor
-            cm = sin.coordinate_manager
-            target_key, _ = cm.insert_and_map(
-                ME.utils.batched_coordinates(data_dict["xyzs"]).to(device),
+            valid_cm = valid_sin.coordinate_manager
+            valid_key, _ = valid_cm.insert_and_map(
+                ME.utils.batched_coordinates(validdata_dict["xyzs"]).to(device),
                 string_id="valid",
             )
 
             # Generate from a dense tensor
-            out_cls, targets, sout = net(sin, target_key)
-            num_layers, loss = len(out_cls), 0
-            for out_cl, target in zip(out_cls, targets):
-                curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
+            valid_out_cls, valid_targets, valid_sout = net(valid_sin, valid_key)
+            num_layers, loss = len(valid_out_cls), 0
+            zip_losses = []
+            for valid_out_cl, valid_target in zip(valid_out_cls, valid_targets):
+                curr_loss = crit(valid_out_cl.F.squeeze(), valid_target.type(valid_out_cl.F.dtype).to(device))
+                zip_losses.append(curr_loss.item()/ num_layers)
                 loss += curr_loss / num_layers
-            valid_losses.append(loss)            
+            avg_loss = np.sum(zip_losses)/len(zip_losses)
+            valid_losses.append(avg_loss)            
             torch.save(
                 {
                     "state_dict": net.state_dict(),
@@ -927,7 +952,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
 
             #net.train()
     plt.plot(losses,'-o')
-    plt.plot(valid_losses,'-o')
+    plt.plot(valid_steps, valid_losses,'-o')
     plt.xlabel('epoch')
     plt.ylabel('losses')
     plt.legend(['Train','Valid'])
@@ -1024,15 +1049,19 @@ if __name__ == "__main__":
             config=config,
         )
         validset_dataloader = valid_data_loader(
+            #"valid",
+            #num_workers = config.num_workers, 
+            #config = config,
             "valid",
-            augment_data = True, 
-            shuffle =False, 
-            num_workers = config.num_workers, 
-            repeat = True, 
-            config = config,
+            #augment_data=True,
+            batch_size=config.batch_size,
+            shuffle=True,
+            num_workers=config.num_workers,
+            repeat=True,
+            config=config,
         )
     else:
-        dataloader = make_data_loader(
+        train_dataloader = make_data_loader(
             "test",
             augment_data=False,
             batch_size=config.batch_size,
