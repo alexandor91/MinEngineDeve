@@ -278,9 +278,86 @@ class ModelNet40Dataset(torch.utils.data.Dataset):
 
         # Get coords
         xyz = xyz * self.resolution
-        coords, inds = ME.utils.sparse_quantize(xyz, return_index=True)
+        #print("&&&&&&&&&&&&&&&&&&")
+        #print(xyz)
 
+        coords, inds = ME.utils.sparse_quantize(xyz, return_index=True)
+        #print("!!!!!!!!!!!!!!!")
+        #print(xyz[inds])
         return (coords, xyz[inds], idx)
+
+class ModelNet40ValidSubset(torch.utils.data.Dataset):
+    def __init__(self, phase, transform=None, config=None):
+        self.phase = phase
+        self.files = []
+        self.cache = {}
+        self.data_objects = []
+        self.transform = transform
+        self.resolution = config.resolution
+
+        #self.root = "./ModelNet40"
+        self.base_name = "/home/eavise/MinEngineDeve/ModelNet40"       
+        filename = os.path.join(self.base_name, "val_chair.txt")    #default filenames; "chair/train/*.off"
+        with open(filename, "r") as f:
+            lines = f.read().splitlines() 
+        f.close()
+        #bathtub bed bench bookshelf boottle chair cone cup curtain 
+        # desk dresser flower_pot glass_box toilet stool sofa stairs table
+        #car airplane person
+        #guitat keyboard lamp mantel monitor night_stand piano plant range_hood 
+        #sink sofa stairs stool table toilet tv_stand vase wardrobe xbox
+        #fnames = sorted([os.path.relpath(fname, self.root) for fname in fnames])
+        self.files = lines
+        assert len(self.files) > 0, "No valid file loaded"
+        self.density = 30000
+
+        # Ignore warnings in obj loader
+        o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        mesh_file = os.path.join(self.base_name, self.files[idx])
+
+        if idx in self.cache:
+            xyz = self.cache[idx]
+        else:
+            # Load a mesh, over sample, copy, rotate, voxelization
+            #mesh_file = '/home/eavise/MinEngineDeve/ModelNet40/chair/train/chair_0312.off'
+            assert os.path.exists(mesh_file)
+            pcd = o3d.io.read_triangle_mesh(mesh_file)
+            # Normalize to fit the mesh inside a unit cube while preserving aspect ratio
+            vertices = np.asarray(pcd.vertices)
+
+            vmax = vertices.max(0, keepdims=True)
+            vmin = vertices.min(0, keepdims=True)
+            pcd.vertices = o3d.utility.Vector3dVector(
+                (vertices - vmin) / (vmax - vmin).max()
+            )
+
+            # Oversample points and copy
+            xyz = resample_mesh(pcd, density=self.density)
+            self.cache[idx] = xyz
+        # Use color or other features if available
+        feats = np.ones((len(xyz), 1))
+        if len(xyz) < 1000:
+            logging.info(
+                f"Skipping {mesh_file}: does not have sufficient CAD sampling density after resampling: {len(xyz)}."
+            )
+            return None
+
+        if self.transform:
+            xyz, feats = self.transform(xyz, feats)
+
+        # Get coords
+        xyz = xyz * self.resolution
+
+        coords, inds = ME.utils.sparse_quantize(xyz, return_index=True)
+        #print("!!!!!!!!!!!!!!!")
+        #print(xyz[inds])
+        return (coords, xyz[inds], idx)
+
 
 def make_data_loader(
     phase, augment_data, batch_size, shuffle, num_workers, repeat, config
@@ -304,6 +381,26 @@ def make_data_loader(
 
     return loader
 
+def valid_data_loader(
+    phase, augment_data, shuffle, num_workers, repeat, config
+):
+    dset = ModelNet40ValidSubset(phase, config=config)
+
+    args = {
+        "num_workers": num_workers,
+        "pin_memory": False,
+        "drop_last": False,
+    }
+
+    #if repeat:
+    #    args["sampler"] = InfSampler(dset, shuffle)
+    #else:
+    #    args["shuffle"] = shuffle
+
+    loader = torch.utils.data.DataLoader(dset, **args)
+
+    return loader
+
 
 ch = logging.StreamHandler(sys.stdout)
 logging.getLogger().setLevel(logging.INFO)
@@ -317,7 +414,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=32)
 parser.add_argument("--epochs", type=int, default=300)     #default 30000
 parser.add_argument("--val_freq", type=int, default=10)      #default is 1000
-parser.add_argument("--batch_size", default=16, type=int)
+parser.add_argument("--batch_size", default=8, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -719,11 +816,10 @@ class Visualizations:
             )
         )
 
-def training_run(net, dataloader, device, config):
+def training_run(net, train_dataloader, valid_dataloader, device, config):
 
     #vis = Visualizations()
     # Training loop
-    loss_values = []
 
     optimizer = optim.SGD(
         net.parameters(),
@@ -736,10 +832,12 @@ def training_run(net, dataloader, device, config):
     crit = nn.BCEWithLogitsLoss()
 
     net.train()
-    train_iter = iter(dataloader)
-    # val_iter = iter(val_dataloader)
+    train_iter = iter(train_dataloader)
+    valid_iter = iter(valid_dataloader)
+
     logging.info(f"LR: {scheduler.get_lr()}")
     losses = []
+    valid_losses = []
 
     for i in range(config.epochs):
 
@@ -767,15 +865,13 @@ def training_run(net, dataloader, device, config):
         # Generate from a dense tensor
         out_cls, targets, sout = net(sin, target_key)
         num_layers, loss = len(out_cls), 0
-        batch_losses = []
         for out_cl, target in zip(out_cls, targets):
             curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
-            batch_losses.append(curr_loss.item())
+            #batch_losses.append(curr_loss.item())
             loss += curr_loss / num_layers
-        batch_losses = np.sum(batch_losses)/len(batch_losses)
-        losses.append(batch_losses)
-        #vis.plot_loss(np.mean(loss_values), i)
-        #loss_values.clear()
+        #batch_losses = np.sum(batch_losses)/len(batch_losses)
+        losses.append(loss)
+
         loss.backward()
         optimizer.step()
         t = time() - s
@@ -786,8 +882,36 @@ def training_run(net, dataloader, device, config):
                 f"Iter: {i}, Loss: {loss.item():.3e}, Data Loading Time: {d:.3e}, Tot Time: {t:.3e}"
             )
 
-
+        # Valid dataset loss storage
         if i % config.val_freq == 0 and i > 0:
+            s = time()
+            validdata_dict = valid_iter.next()
+            d = time() - s
+
+            optimizer.zero_grad()
+
+            in_feat = torch.ones((len(validdata_dict["coords"]), 1))
+
+            sin = ME.SparseTensor(
+                features=in_feat,
+                coordinates=data_dict["coords"],
+                device=device,
+            )
+
+            # Generate target sparse tensor
+            cm = sin.coordinate_manager
+            target_key, _ = cm.insert_and_map(
+                ME.utils.batched_coordinates(data_dict["xyzs"]).to(device),
+                string_id="valid",
+            )
+
+            # Generate from a dense tensor
+            out_cls, targets, sout = net(sin, target_key)
+            num_layers, loss = len(out_cls), 0
+            for out_cl, target in zip(out_cls, targets):
+                curr_loss = crit(out_cl.F.squeeze(), target.type(out_cl.F.dtype).to(device))
+                loss += curr_loss / num_layers
+            valid_losses.append(loss)            
             torch.save(
                 {
                     "state_dict": net.state_dict(),
@@ -801,9 +925,9 @@ def training_run(net, dataloader, device, config):
             scheduler.step()
             logging.info(f"LR: {scheduler.get_lr()}")
 
-            net.train()
-
+            #net.train()
     plt.plot(losses,'-o')
+    plt.plot(valid_losses,'-o')
     plt.xlabel('epoch')
     plt.ylabel('losses')
     plt.legend(['Train','Valid'])
@@ -876,9 +1000,6 @@ def visualize(net, dataloader, device, config):
 
             o3d.visualization.draw_geometries_with_animation_callback([pcd, inpointSet, opcd], rotate_view)
 
-        print("666666")
-
-
 
         #inpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
         #pcd.translate([0.6 * config.resolution, 0, 0])
@@ -891,9 +1012,9 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    config.eval = True
+    config.eval = False
     if not config.eval:
-        dataloader = make_data_loader(
+        train_dataloader = make_data_loader(
             "train",
             augment_data=True,
             batch_size=config.batch_size,
@@ -901,6 +1022,14 @@ if __name__ == "__main__":
             num_workers=config.num_workers,
             repeat=True,
             config=config,
+        )
+        validset_dataloader = valid_data_loader(
+            "valid",
+            augment_data = True, 
+            shuffle =False, 
+            num_workers = config.num_workers, 
+            repeat = True, 
+            config = config,
         )
     else:
         dataloader = make_data_loader(
@@ -912,16 +1041,16 @@ if __name__ == "__main__":
             repeat=False,
             config=config,
         )
+        validset_dataloader = None
 
-    in_nchannel = len(dataloader.dataset)
-
+    in_nchannel = len(train_dataloader.dataset)
     net = CompletionNet(config.resolution, in_nchannel=in_nchannel)
     net.to(device)
 
     logging.info(net)
 
     if not config.eval:
-        training_run(net, dataloader, device, config)
+        training_run(net, train_dataloader, validset_dataloader, device, config)
     else:
         if not os.path.exists(config.weights):
             logging.info(f"Downloaing pretrained weights. This might take a while...")
