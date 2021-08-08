@@ -94,13 +94,13 @@ class CollationAndTransformation:
 
     def __call__(self, list_data):
         coords, feats, labels = list(zip(*list_data))
-        coords = self.random_crop(coords)
+        incomplete_coords = self.random_crop(coords)
 
         # Concatenate all lists
         return {
             "coords": ME.utils.batched_coordinates(coords),
             "xyzs": [torch.from_numpy(feat).float() for feat in feats],
-            "cropped_coords": coords,
+            "cropped_coords": incomplete_coords,
             "labels": torch.LongTensor(labels),
         }
 
@@ -380,7 +380,7 @@ def make_data_loader(
     args = {
         "batch_size": batch_size,
         "num_workers": num_workers,
-        "collate_fn": CollationAndTransformation(config.resolution),
+        "collate_fn": CollationAndTransformation(config.resolution),        
         "pin_memory": False,
         "drop_last": False,
     }
@@ -994,42 +994,38 @@ def visualize(net, dataloader, device, config):
 
         batch_coords, batch_feats = sout.decomposed_coordinates_and_features
         for b, (coords, feats, target) in enumerate(zip(batch_coords, batch_feats, targets)):
-            pcd = PointCloud(coords.cpu())
+            predicted_pcd = PointCloud(coords.cpu())
             #pcd.estimate_normals()
-            pcd.translate([0.9 * config.resolution, 0, 0])
-            pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-            pcd.paint_uniform_color([0.5, 0.5, 0.5])
+            predicted_pcd.translate([0.9 * config.resolution, 0, 0])
+            predicted_pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            predicted_pcd.paint_uniform_color([0.5, 0.3, 0.3])
 
-            opcd = PointCloud(data_dict["cropped_coords"][b])
-            #inpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
-            opcd.translate([-0.9 * config.resolution, 0, 0])
-            opcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-            opcd.paint_uniform_color([0.5, 0.3, 0.4])
+            cropped_pcd = PointCloud(data_dict["cropped_coords"][b])
+            #gtpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
+            cropped_pcd.translate([0, 0, 0])
+            cropped_pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            cropped_pcd.paint_uniform_color([0.3, 0.5, 0.3])
 
             input_pcd = data_dict["coords"].numpy()[:, 0:4]
             mask = (input_pcd[:,0]==b)
             final_pcd = input_pcd[np.where(input_pcd[:,0]==b)]
             print("###############")
             print(final_pcd)
-            print(b)
-            inpointSet = o3d.geometry.PointCloud()
-            inpointSet.points = o3d.utility.Vector3dVector(final_pcd[:, 1:4])
-            inpointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-            inpointSet.paint_uniform_color([0.4, 0.3, 0.4])
+            #print(b)
+            gt_pointSet = o3d.geometry.PointCloud()
+            gt_pointSet.points = o3d.utility.Vector3dVector(final_pcd[:, 1:4])
+            gt_pointSet.translate([-0.9 * config.resolution, 0, 0])
+            gt_pointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
+            gt_pointSet.paint_uniform_color([0.3, 0.3, 0.5])
 
-            #o3d.visualization.draw_geometries([pcd, inpointSet, opcd])
+            #o3d.visualization.draw_geometries([pcd, gtpointSet, opcd])
             def rotate_view(vis):
                    ctr = vis.get_view_control()
                    ctr.rotate(10.0, 0.0)
                    return False
 
-            o3d.visualization.draw_geometries_with_animation_callback([pcd, inpointSet, opcd], rotate_view)
+            o3d.visualization.draw_geometries_with_animation_callback([gt_pointSet, cropped_pcd, predicted_pcd], rotate_view)
 
-
-        #inpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
-        #pcd.translate([0.6 * config.resolution, 0, 0])
-        #inpointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
-        #inpointSet.paint_uniform_color([0.4, 0.3, 0.4])
 
 
 if __name__ == "__main__":
@@ -1037,7 +1033,7 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    config.eval = False
+    config.eval = True
     if not config.eval:
         train_dataloader = make_data_loader(
             "train",
@@ -1092,4 +1088,4 @@ if __name__ == "__main__":
         #net = nn.DataParallel(net)
         net.load_state_dict(checkpoint["state_dict"])
 
-        visualize(net, dataloader, device, config)
+        visualize(net, train_dataloader, device, config)
