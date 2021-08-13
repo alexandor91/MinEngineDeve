@@ -32,7 +32,8 @@ import urllib
 import glob
 import visdom
 from datetime import datetime
-# Must be imported before large libs
+# Must be imported before large libsclass CollationAndTransformation:
+
 try:
     import open3d as o3d
 except ImportError:
@@ -309,11 +310,8 @@ class ModelNet40ValidSubset(torch.utils.data.Dataset):
         self.resolution = config.resolution
 
         #self.root = "./ModelNet40"
-<<<<<<< Updated upstream
         self.base_name = "/home/eavise/MinkowskiEngine/ModelNet40"       
-=======
-        self.base_name = "/home/eavise/MinEngineDeve/ModelNet40"       
->>>>>>> Stashed changes
+
         filename = os.path.join(self.base_name, "val_modelnet40.txt")    #default filenames; "chair/train/*.off"
         with open(filename, "r") as f:
             lines = f.read().splitlines() 
