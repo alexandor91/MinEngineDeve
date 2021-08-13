@@ -217,11 +217,11 @@ class ModelNet40Dataset(torch.utils.data.Dataset):
         self.last_cache_percent = 0
 
         #self.root = "./ModelNet40"
-        self.base_name = "/home/eavise/MinEngineDeve/ModelNet40"
+        self.base_name = "/home/eavise/MinkowskiEngine/ModelNet40"
         if (self.phase == "train"):
-            filename = os.path.join(self.base_name, "train_chair.txt")    #default filenames; "chair/train/*.off"
+            filename = os.path.join(self.base_name, "train_modelnet40.txt")    #default filenames; "chair/train/*.off"
         elif (self.phase == "test"):
-            filename = os.path.join(self.base_name, "test_chair.txt")    #default filenames; "chair/train/*.off"
+            filename = os.path.join(self.base_name, "test_modelnet40.txt")    #default filenames; "chair/train/*.off"
         with open(filename, "r") as f:
             lines = f.read().splitlines() 
         f.close()
@@ -309,8 +309,8 @@ class ModelNet40ValidSubset(torch.utils.data.Dataset):
         self.resolution = config.resolution
 
         #self.root = "./ModelNet40"
-        self.base_name = "/home/eavise/MinEngineDeve/ModelNet40"       
-        filename = os.path.join(self.base_name, "val_chair.txt")    #default filenames; "chair/train/*.off"
+        self.base_name = "/home/eavise/MinkowskiEngine/ModelNet40"       
+        filename = os.path.join(self.base_name, "val_modelnet40.txt")    #default filenames; "chair/train/*.off"
         with open(filename, "r") as f:
             lines = f.read().splitlines() 
         f.close()
@@ -434,9 +434,9 @@ logging.basicConfig(
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=128)
-parser.add_argument("--epochs", type=int, default=10000)     #default 30000
+parser.add_argument("--epochs", type=int, default=1000)     #default 30000
 parser.add_argument("--val_freq", type=int, default=5)      #default is 1000
-parser.add_argument("--batch_size", default=8, type=int)
+parser.add_argument("--batch_size", default=4, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -936,15 +936,17 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
                 zip_losses.append(curr_loss.item()/ num_layers)
                 loss += curr_loss / num_layers
             avg_loss = np.sum(zip_losses)/len(zip_losses)
-            valid_losses.append(avg_loss)            
+            valid_losses.append(avg_loss)
+        if i % 100 == 0            
             torch.save(
                 {
+                    "epoch": i,
                     "state_dict": net.state_dict(),
                     "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(),
-                    "curr_iter": i,
+                    "loss": loss,
                 },
-                config.weights,
+                "modelnet_completion{}.pth".format(i),
             )
 
             scheduler.step()
@@ -1045,7 +1047,7 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    config.eval = True
+    config.eval = False
     if not config.eval:
         train_dataloader = make_data_loader(
             "train",
