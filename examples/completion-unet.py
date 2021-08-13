@@ -435,7 +435,7 @@ logging.basicConfig(
 )
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--resolution", type=int, default=128)
+parser.add_argument("--resolution", type=int, default=64)
 parser.add_argument("--epochs", type=int, default=1000)     #default 30000
 parser.add_argument("--val_freq", type=int, default=5)      #default is 1000
 parser.add_argument("--batch_size", default=4, type=int)
@@ -844,7 +844,6 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
 
     #vis = Visualizations()
     # Training loop
-
     optimizer = optim.SGD(
         net.parameters(),
         lr=config.lr,
@@ -852,6 +851,17 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
         weight_decay=config.weight_decay,
     )
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, 0.95)
+    new_epochs = config.epochs
+    weights_model_path = '/home/eavise/MinkowskiEngine/modelnet_completion0.pth'
+    if os.path.exists(weights_model_path):
+        checkpoint = torch.load(weights_model_path)
+        net.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        scheduler.load_state_dict(checkpoint['scheduler'])
+        new_epochs = config.epochs - checkpoint['epoch']
+        print('&&&&&&&&&&&&&&&')
+        print(config.epochs)
+        # load_loss = checkpoint['loss']
 
     crit = nn.BCEWithLogitsLoss()
 
@@ -864,7 +874,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
     valid_losses = []
     valid_steps = []
 
-    for i in range(config.epochs):
+    for i in range(new_epochs):
 
         s = time()
         data_dict = train_iter.next()
