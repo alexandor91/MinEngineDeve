@@ -939,6 +939,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
                 loss += curr_loss / num_layers
             avg_loss = np.sum(zip_losses)/len(zip_losses)
             valid_losses.append(avg_loss)
+        # save checkpoint every nth epoch
         if i % 100 == 0:            
             torch.save(
                 {
