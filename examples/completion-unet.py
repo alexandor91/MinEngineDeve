@@ -123,7 +123,7 @@ class InfSampler(Sampler):
         data_source (Dataset): dataset to sample from
     """
 
-    def __init__(self, data_source, shuffle=False):
+    def __init__(self, data_source, shuffle=True):
         self.data_source = data_source
         self.shuffle = shuffle
         self.reset_permutation()
@@ -309,7 +309,11 @@ class ModelNet40ValidSubset(torch.utils.data.Dataset):
         self.resolution = config.resolution
 
         #self.root = "./ModelNet40"
+<<<<<<< Updated upstream
         self.base_name = "/home/eavise/MinkowskiEngine/ModelNet40"       
+=======
+        self.base_name = "/home/eavise/MinEngineDeve/ModelNet40"       
+>>>>>>> Stashed changes
         filename = os.path.join(self.base_name, "val_modelnet40.txt")    #default filenames; "chair/train/*.off"
         with open(filename, "r") as f:
             lines = f.read().splitlines() 
@@ -440,7 +444,7 @@ parser.add_argument("--batch_size", default=4, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
-parser.add_argument("--num_workers", type=int, default=1)
+parser.add_argument("--num_workers", type=int, default=2)
 parser.add_argument("--stat_freq", type=int, default=5)
 parser.add_argument("--weights", type=str, default="modelnet_completion.pth")
 parser.add_argument("--load_optimizer", type=str, default="true")
@@ -937,7 +941,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
                 loss += curr_loss / num_layers
             avg_loss = np.sum(zip_losses)/len(zip_losses)
             valid_losses.append(avg_loss)
-        if i % 100 == 0            
+        if i % 100 == 0:            
             torch.save(
                 {
                     "epoch": i,
