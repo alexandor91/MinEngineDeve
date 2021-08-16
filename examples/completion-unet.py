@@ -436,7 +436,8 @@ logging.basicConfig(
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=64)
-parser.add_argument("--epochs", type=int, default=1000)     #default 30000
+parser.add_argument("--epochs", type=int, default=6)
+parser.add_argument("--iterations", type=int, default=8871//6)     #default 30000 data size/batch size
 parser.add_argument("--val_freq", type=int, default=5)      #default is 1000
 parser.add_argument("--batch_size", default=6, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
@@ -456,14 +457,18 @@ parser.add_argument("--max_visualization", type=int, default=4)
 
 class CompletionNet(nn.Module):
 
-    ENC_CHANNELS = [16, 32, 64, 128, 256, 512, 1024]
-    DEC_CHANNELS = [16, 32, 64, 128, 256, 512, 1024]
+    ENC_CHANNELS = [16, 32, 64, 128, 256]    #1024 for 128 tensor stride
+    DEC_CHANNELS = [16, 32, 64, 128, 256]    #1024 for 128 tensor stride
 
-    def __init__(self, resolution, in_nchannel=512):
+    def __init__(self, resolution, status, in_nchannel=512):
         nn.Module.__init__(self)
-
+    
         self.resolution = resolution
 
+        if status == "training":
+            self.training = True
+        else:
+            self.training = False
         # Input sparse tensor must have tensor stride 128.
         enc_ch = self.ENC_CHANNELS
         dec_ch = self.DEC_CHANNELS
@@ -519,66 +524,66 @@ class CompletionNet(nn.Module):
             ME.MinkowskiELU(),
         )
 
-        self.enc_block_s16s32 = nn.Sequential(
-            ME.MinkowskiConvolution(
-                enc_ch[4], enc_ch[5], kernel_size=2, stride=2, dimension=3
-            ),
-            ME.MinkowskiBatchNorm(enc_ch[5]),
-            ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[5], enc_ch[5], kernel_size=3, dimension=3),
-            ME.MinkowskiBatchNorm(enc_ch[5]),
-            ME.MinkowskiELU(),
-        )
+        # self.enc_block_s16s32 = nn.Sequential(
+        #     ME.MinkowskiConvolution(
+        #         enc_ch[4], enc_ch[5], kernel_size=2, stride=2, dimension=3
+        #     ),
+        #     ME.MinkowskiBatchNorm(enc_ch[5]),
+        #     ME.MinkowskiELU(),
+        #     ME.MinkowskiConvolution(enc_ch[5], enc_ch[5], kernel_size=3, dimension=3),
+        #     ME.MinkowskiBatchNorm(enc_ch[5]),
+        #     ME.MinkowskiELU(),
+        # )
 
-        self.enc_block_s32s64 = nn.Sequential(
-            ME.MinkowskiConvolution(
-                enc_ch[5], enc_ch[6], kernel_size=2, stride=2, dimension=3
-            ),
-            ME.MinkowskiBatchNorm(enc_ch[6]),
-            ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(enc_ch[6], enc_ch[6], kernel_size=3, dimension=3),
-            ME.MinkowskiBatchNorm(enc_ch[6]),
-            ME.MinkowskiELU(),
-        )
+        # self.enc_block_s32s64 = nn.Sequential(
+        #     ME.MinkowskiConvolution(
+        #         enc_ch[5], enc_ch[6], kernel_size=2, stride=2, dimension=3
+        #     ),
+        #     ME.MinkowskiBatchNorm(enc_ch[6]),
+        #     ME.MinkowskiELU(),
+        #     ME.MinkowskiConvolution(enc_ch[6], enc_ch[6], kernel_size=3, dimension=3),
+        #     ME.MinkowskiBatchNorm(enc_ch[6]),
+        #     ME.MinkowskiELU(),
+        # )
 
         # Decoder
-        self.dec_block_s64s32 = nn.Sequential(
-            ME.MinkowskiGenerativeConvolutionTranspose(
-                enc_ch[6],
-                dec_ch[5],
-                kernel_size=4,
-                stride=2,
-                dimension=3,
-            ),
-            ME.MinkowskiBatchNorm(dec_ch[5]),
-            ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[5], dec_ch[5], kernel_size=3, dimension=3),
-            ME.MinkowskiBatchNorm(dec_ch[5]),
-            ME.MinkowskiELU(),
-        )
+        # self.dec_block_s64s32 = nn.Sequential(
+        #     ME.MinkowskiGenerativeConvolutionTranspose(
+        #         enc_ch[6],
+        #         dec_ch[5],
+        #         kernel_size=4,
+        #         stride=2,
+        #         dimension=3,
+        #     ),
+        #     ME.MinkowskiBatchNorm(dec_ch[5]),
+        #     ME.MinkowskiELU(),
+        #     ME.MinkowskiConvolution(dec_ch[5], dec_ch[5], kernel_size=3, dimension=3),
+        #     ME.MinkowskiBatchNorm(dec_ch[5]),
+        #     ME.MinkowskiELU(),
+        # )
 
-        self.dec_s32_cls = ME.MinkowskiConvolution(
-            dec_ch[5], 1, kernel_size=1, bias=True, dimension=3
-        )
+        # self.dec_s32_cls = ME.MinkowskiConvolution(
+        #     dec_ch[5], 1, kernel_size=1, bias=True, dimension=3
+        # )
 
-        self.dec_block_s32s16 = nn.Sequential(
-            ME.MinkowskiGenerativeConvolutionTranspose(
-                enc_ch[5],
-                dec_ch[4],
-                kernel_size=2,
-                stride=2,
-                dimension=3,
-            ),
-            ME.MinkowskiBatchNorm(dec_ch[4]),
-            ME.MinkowskiELU(),
-            ME.MinkowskiConvolution(dec_ch[4], dec_ch[4], kernel_size=3, dimension=3),
-            ME.MinkowskiBatchNorm(dec_ch[4]),
-            ME.MinkowskiELU(),
-        )
+        # self.dec_block_s32s16 = nn.Sequential(
+        #     ME.MinkowskiGenerativeConvolutionTranspose(
+        #         enc_ch[5],
+        #         dec_ch[4],
+        #         kernel_size=2,
+        #         stride=2,
+        #         dimension=3,
+        #     ),
+        #     ME.MinkowskiBatchNorm(dec_ch[4]),
+        #     ME.MinkowskiELU(),
+        #     ME.MinkowskiConvolution(dec_ch[4], dec_ch[4], kernel_size=3, dimension=3),
+        #     ME.MinkowskiBatchNorm(dec_ch[4]),
+        #     ME.MinkowskiELU(),
+        # )
 
-        self.dec_s16_cls = ME.MinkowskiConvolution(
-            dec_ch[4], 1, kernel_size=1, bias=True, dimension=3
-        )
+        # self.dec_s16_cls = ME.MinkowskiConvolution(
+        #     dec_ch[4], 1, kernel_size=1, bias=True, dimension=3
+        # )
 
         self.dec_block_s16s8 = nn.Sequential(
             ME.MinkowskiGenerativeConvolutionTranspose(
@@ -690,53 +695,53 @@ class CompletionNet(nn.Module):
         enc_s4 = self.enc_block_s2s4(enc_s2)
         enc_s8 = self.enc_block_s4s8(enc_s4)
         enc_s16 = self.enc_block_s8s16(enc_s8)
-        enc_s32 = self.enc_block_s16s32(enc_s16)
-        enc_s64 = self.enc_block_s32s64(enc_s32)
+        # enc_s32 = self.enc_block_s16s32(enc_s16)
+        # enc_s64 = self.enc_block_s32s64(enc_s32)
 
         ##################################################
         # Decoder 64 -> 32
         ##################################################
-        dec_s32 = self.dec_block_s64s32(enc_s64)
+        # dec_s32 = self.dec_block_s64s32(enc_s64)
 
         # Add encoder features
-        dec_s32 = dec_s32 + enc_s32
-        dec_s32_cls = self.dec_s32_cls(dec_s32)
-        keep_s32 = (dec_s32_cls.F > 0).squeeze()
+        # dec_s32 = dec_s32 + enc_s32
+        # dec_s32_cls = self.dec_s32_cls(dec_s32)
+        # keep_s32 = (dec_s32_cls.F > 0).squeeze()
 
-        target = self.get_target(dec_s32, target_key)
-        targets.append(target)
-        out_cls.append(dec_s32_cls)
+        # target = self.get_target(dec_s32, target_key)
+        # targets.append(target)
+        # out_cls.append(dec_s32_cls)
 
-        if self.training:
-            keep_s32 += target
+        # if self.training:
+        #     keep_s32 += target
 
-        # Remove voxels s32
-        dec_s32 = self.pruning(dec_s32, keep_s32)
+        # # Remove voxels s32
+        # dec_s32 = self.pruning(dec_s32, keep_s32)
 
         ##################################################
         # Decoder 32 -> 16
         ##################################################
-        dec_s16 = self.dec_block_s32s16(dec_s32)
+        # dec_s16 = self.dec_block_s32s16(enc_s32)
 
-        # Add encoder features
-        dec_s16 = dec_s16 + enc_s16
-        dec_s16_cls = self.dec_s16_cls(dec_s16)
-        keep_s16 = (dec_s16_cls.F > 0).squeeze()
+        # # Add encoder features
+        # dec_s16 = dec_s16 + enc_s16
+        # dec_s16_cls = self.dec_s16_cls(dec_s16)
+        # keep_s16 = (dec_s16_cls.F > 0).squeeze()
 
-        target = self.get_target(dec_s16, target_key)
-        targets.append(target)
-        out_cls.append(dec_s16_cls)
+        # target = self.get_target(dec_s16, target_key)
+        # targets.append(target)
+        # out_cls.append(dec_s16_cls)
 
-        if self.training:
-            keep_s16 += target
+        # if self.training:
+        #     keep_s16 += target
 
-        # Remove voxels s16
-        dec_s16 = self.pruning(dec_s16, keep_s16)
+        # # Remove voxels s16
+        # dec_s16 = self.pruning(dec_s16, keep_s16)
 
         ##################################################
         # Decoder 16 -> 8
         ##################################################
-        dec_s8 = self.dec_block_s16s8(dec_s16)
+        dec_s8 = self.dec_block_s16s8(enc_s16)
 
         # Add encoder features
         dec_s8 = dec_s8 + enc_s8
@@ -851,16 +856,16 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
         weight_decay=config.weight_decay,
     )
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, 0.95)
-    new_epochs = config.epochs
-    weights_model_path = '/home/eavise/MinkowskiEngine/modelnet_completion0.pth'
+    new_iterations = config.epochs * config.iterations
+    weights_model_path = '/home/eavise/MinkowskiEngine/modelnet_completion00.pth'
     if os.path.exists(weights_model_path):
         checkpoint = torch.load(weights_model_path)
         net.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
-        new_epochs = config.epochs - checkpoint['epoch']
+        new_iterations = new_iterations - checkpoint['iterations']
         print('&&&&&&&&&&&&&&&')
-        print(config.epochs)
+        print(new_iterations)
         # load_loss = checkpoint['loss']
 
     crit = nn.BCEWithLogitsLoss()
@@ -874,7 +879,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
     valid_losses = []
     valid_steps = []
 
-    for i in range(new_epochs):
+    for i in range(new_iterations):
 
         s = time()
         data_dict = train_iter.next()
@@ -950,10 +955,10 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
             avg_loss = np.sum(zip_losses)/len(zip_losses)
             valid_losses.append(avg_loss)
         # save checkpoint every nth epoch
-        if i % 100 == 0:            
+        if i % 1000 == 0:            
             torch.save(
                 {
-                    "epoch": i,
+                    "iterations": i,
                     "state_dict": net.state_dict(),
                     "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(),
@@ -968,7 +973,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
             #net.train()
     plt.plot(losses,'-o')
     plt.plot(valid_steps, valid_losses,'-o')
-    plt.xlabel('epoch')
+    plt.xlabel('iterations')
     plt.ylabel('losses')
     plt.legend(['Train','Valid'])
     plt.title('Train vs Valid Losses')
@@ -1060,7 +1065,7 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    config.eval = True
+    config.eval = False
     if not config.eval:
         train_dataloader = make_data_loader(
             "train",
@@ -1082,6 +1087,7 @@ if __name__ == "__main__":
             repeat=True,
             config=config,
         )
+        status = "training"
     else:
         train_dataloader = make_data_loader(
             "test",
@@ -1093,9 +1099,10 @@ if __name__ == "__main__":
             config=config,
         )
         validset_dataloader = None
+        status = "test"
 
     in_nchannel = len(train_dataloader.dataset)
-    net = CompletionNet(config.resolution, in_nchannel=in_nchannel)
+    net = CompletionNet(config.resolution, status, in_nchannel=in_nchannel)
     net.to(device)
 
     logging.info(net)
