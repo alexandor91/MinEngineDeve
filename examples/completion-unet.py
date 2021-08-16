@@ -438,7 +438,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=64)
 parser.add_argument("--epochs", type=int, default=1000)     #default 30000
 parser.add_argument("--val_freq", type=int, default=5)      #default is 1000
-parser.add_argument("--batch_size", default=4, type=int)
+parser.add_argument("--batch_size", default=6, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -1011,13 +1011,13 @@ def visualize(net, dataloader, device, config):
         for b, (coords, feats, target) in enumerate(zip(batch_coords, batch_feats, targets)):
             predicted_pcd = PointCloud(coords.cpu())
             #pcd.estimate_normals()
-            predicted_pcd.translate([0.6 * config.resolution, 0, 0])
+            predicted_pcd.translate([1.2 * config.resolution, 0, 0])
             predicted_pcd.rotate(M, np.array([[0.0], [0.0], [0.0]]))
             predicted_pcd.scale(100 / np.max(predicted_pcd.get_max_bound() - predicted_pcd.get_min_bound()),
                      center=predicted_pcd.get_center())
             predicted_pcd.paint_uniform_color([0.5, 0.3, 0.3])
             predicted_voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(predicted_pcd,
-                                                                        voxel_size=0.5)
+                                                                        voxel_size=0.6)
 
             cropped_pcd = PointCloud(data_dict["cropped_coords"][b])
             #gtpointSet.points = o3d.utility.Vector3dVector(input_pcd.cpu())
@@ -1027,7 +1027,7 @@ def visualize(net, dataloader, device, config):
                      center=cropped_pcd.get_center())
             cropped_pcd.paint_uniform_color([0.3, 0.5, 0.3])
             cropped_voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(cropped_pcd,
-                                                                        voxel_size=0.5)
+                                                                        voxel_size=0.6)
 
             input_pcd = data_dict["coords"].numpy()[:, 0:4]
             mask = (input_pcd[:,0]==b)
@@ -1037,13 +1037,13 @@ def visualize(net, dataloader, device, config):
             #print(b)
             gt_pointSet = o3d.geometry.PointCloud()
             gt_pointSet.points = o3d.utility.Vector3dVector(final_pcd[:, 1:4])
-            gt_pointSet.translate([-0.6 * config.resolution, 0, 0])
+            gt_pointSet.translate([-1.2 * config.resolution, 0, 0])
             gt_pointSet.rotate(M, np.array([[0.0], [0.0], [0.0]]))
             gt_pointSet.scale(100 / np.max(gt_pointSet.get_max_bound() - gt_pointSet.get_min_bound()),
                     center=gt_pointSet.get_center())
             gt_pointSet.paint_uniform_color([0.3, 0.3, 0.5])
             gt_voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(gt_pointSet,
-                                                                        voxel_size=0.5)
+                                                                        voxel_size=0.6)
 
             #o3d.visualization.draw_geometries([pcd, gtpointSet, opcd])
             def rotate_view(vis):
@@ -1060,7 +1060,7 @@ if __name__ == "__main__":
     logging.info(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    config.eval = False
+    config.eval = True
     if not config.eval:
         train_dataloader = make_data_loader(
             "train",
