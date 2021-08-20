@@ -437,9 +437,9 @@ logging.basicConfig(
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, default=64)
 parser.add_argument("--epochs", type=int, default=6)
-parser.add_argument("--iterations", type=int, default=8871//6)     #default 30000 data size/batch size
+parser.add_argument("--iterations", type=int, default=8871//4)     #default 30000 data size/batch size
 parser.add_argument("--val_freq", type=int, default=5)      #default is 1000
-parser.add_argument("--batch_size", default=6, type=int)
+parser.add_argument("--batch_size", default=4, type=int)
 parser.add_argument("--lr", default=1e-2, type=float)
 parser.add_argument("--momentum", type=float, default=0.9)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
@@ -856,16 +856,16 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
         weight_decay=config.weight_decay,
     )
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, 0.95)
-    new_iterations = config.epochs * config.iterations
+    total_iterations = config.epochs * config.iterations
     weights_model_path = '/home/eavise/MinkowskiEngine/modelnet_completion00.pth'
     if os.path.exists(weights_model_path):
         checkpoint = torch.load(weights_model_path)
         net.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
-        new_iterations = new_iterations - checkpoint['iterations']
+        total_iterations = total_iterations - checkpoint['iterations']
         print('&&&&&&&&&&&&&&&')
-        print(new_iterations)
+        print(total_iterations)
         # load_loss = checkpoint['loss']
 
     crit = nn.BCEWithLogitsLoss()
@@ -879,7 +879,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
     valid_losses = []
     valid_steps = []
 
-    for i in range(new_iterations):
+    for i in range(total_iterations):
 
         s = time()
         data_dict = train_iter.next()
@@ -915,6 +915,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
 
         loss.backward()
         optimizer.step()
+        torch.cuda.empty_cache()    #clear cache after every interval
         t = time() - s
 
         # Visualization data in browser and logging 
@@ -928,7 +929,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
             validdata_dict = valid_iter.next()
             valid_steps.append(i)
             optimizer.zero_grad()
-
+            torch.cuda.empty_cache() 
             valid_in_feat = torch.ones((len(validdata_dict["coords"]), 1))
 
             valid_sin = ME.SparseTensor(
@@ -955,7 +956,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
             avg_loss = np.sum(zip_losses)/len(zip_losses)
             valid_losses.append(avg_loss)
         # save checkpoint every nth epoch
-        if i % 1000 == 0:            
+        if i % 800 == 0 or i == total_iterations:            
             torch.save(
                 {
                     "iterations": i,
@@ -973,6 +974,7 @@ def training_run(net, train_dataloader, valid_dataloader, device, config):
             #net.train()
     plt.plot(losses,'-o')
     plt.plot(valid_steps, valid_losses,'-o')
+    plt.plot(list(range(0, config.epochs*config.iterations, config.iterations)), [0.2]*config.epochs, '-o')
     plt.xlabel('iterations')
     plt.ylabel('losses')
     plt.legend(['Train','Valid'])
